@@ -6,14 +6,17 @@ import Web3Modal, { getInjectedProviderName } from "web3modal";
 import { WHITELIST_CONTRACT_ADDRESS, abi } from "../constants";
 
 export default function Home() {
-  const [_provider, setProvider] = useState(null);
 
-  const [numberOfWhitelisted, setNumberOfWhitelisted] = useState(0);
+  const [provider, setProvider] = useState();
+  const [account, setAccount] = useState();
+
+  const [numberOfWhitelisted, setNumberOfWhitelisted] = useState('unknown');
   const [walletConnected, setWalletConnected] = useState(false);
   const [connectedWalletName, setConnectedWalletName] = useState(null);
   const web3ModalRef = useRef();
-  const [joinedWhitelist, setJoinedWhitelist] = useState(null);
+  const [joinedWhitelist, setJoinedWhitelist] = useState(false);
   const [loading, setLoading] = useState(false);
+
 
   const getNumberOfWhitelisted = async() => {
     try{
@@ -22,8 +25,7 @@ export default function Home() {
       const _numberOfWhitelisted = await whitelistContract.numAddressesWhitelisted()
       setNumberOfWhitelisted(_numberOfWhitelisted);
     } catch(error){
-      console.error(error);
-      window.alert(`getNumberofWhitelisted function says: ${error}`)
+      console.error("getNumberofWhitelisted: ",error);
     }
   }
 
@@ -35,28 +37,25 @@ export default function Home() {
       const _joinedWhitelist = await whitelistContract.whitelistedAddresses(address);
       setJoinedWhitelist(_joinedWhitelist);
     } catch(error){
-      console.error(error);
-      window.alert(`function checkIfAddressInWhitelist says: ${error}`);
+      console.error("checkIfAddressInWhitelisted: ",error);
     }
   }
   
   const getProviderOrSigner = async(needSigner = false) => {
     try {
-      // Connect to Metamask
+      // connect Metamask
       // Since we store `web3Modal` as a reference, we need to access the `current` value to get access to the underlying object
       const instance = await web3ModalRef.current.connect();
+      setProvider(instance);
       const provider = new providers.Web3Provider(instance);
-      setProvider(provider);
-      const providerName = getInjectedProviderName()
+      const accounts = await provider.listAccounts();
+      if(accounts) setAccount(accounts[0]);
+      setWalletConnected(true);
+      const providerName = getInjectedProviderName();
       setConnectedWalletName(providerName);
-      provider.on("disconnect", () => {
-        window.alert("wallet disconnected");
-      });
-
-      // If user is not connected to the Rinkeby network, let them know and throw an error
+      // If user is not connected to the Rinkeby network, throw an error
       const { chainId } = await provider.getNetwork();
       if (chainId !== 4) {
-        window.alert("Change the network to Rinkeby");
         throw new Error("Change network to Rinkeby");
       }
 
@@ -67,24 +66,10 @@ export default function Home() {
       return provider;
 
     } catch(error) {
-      console.error(error);
-      window.alert(`function getProviderOrSigner says: ${error}`);
+      window.alert(error);
+      console.error("getProviderOrSigner: ",error);
     }
-  };
-  
-  const connectWallet = async() => {
-    try {
-      // Get the provider from web3Modal
-      // When used for the first time, it prompts the user to connect their wallet
-      await getProviderOrSigner();
-      setWalletConnected(true);
-      checkIfAddressInWhitelist();
-      getNumberOfWhitelisted();
-    } catch (error) {
-      console.error(error);
-      window.alert(`function getProviedOrSigner: ${error}`)
-    }
-  }
+  };  
 
   const addToWhitelist = async() => {
     try {
@@ -105,22 +90,51 @@ export default function Home() {
       // await getNumberOfWhitelisted();
       // setJoinedWhitelist(true);
     } catch(error) {
-      window.alert(`addToWhitelist says: ${error}`);
-      console.error(error);
+      console.error("addToWhitelist: ",error);
+    }
+  }
+
+  const disconnectWallet = async() => {
+    await web3ModalRef.current.clearCachedProvider();
+    setWalletConnected(false);
+    setConnectedWalletName();
+    setAccount();
+  }
+
+  const connectWallet = async() => {
+    try {
+      await getProviderOrSigner();
+      //setWalletConnected(true);
+      checkIfAddressInWhitelist();
+      getNumberOfWhitelisted();
+    } catch (error) {
+      console.error("getNumberofWhitelisted: ",error);
     }
   }
 
   const renderButton = () => {
     if(walletConnected){  
       if(loading) {
-        return <button className={styles.button}>loading...</button>
+        return ( 
+          <>
+            <button className={styles.button}>loading...</button>
+            <button onClick={disconnectWallet} className={styles.button}>Disconnect Wallet</button>
+          </> 
+
+        )
       }
       else if(!joinedWhitelist){
-        return <button className={styles.button} onClick={addToWhitelist}>Join Whitelist</button>
+        return(
+          <>
+            <button className={styles.button} onClick={addToWhitelist}>Join Whitelist</button>
+            <button onClick={disconnectWallet} className={styles.button}>Disconnect Wallet</button>
+          </>
+        ) 
       } else {
         return(
           <div className={styles.description}>
             Thankyou for joining the whitelist!
+            <button onClick={disconnectWallet} className={styles.button}>Disconnect Wallet</button> 
           </div>
         )
       }
@@ -128,7 +142,16 @@ export default function Home() {
       return <button onClick={connectWallet} className={styles.button}>Connect Wallet</button>
     }
   }
-  
+
+  const funcConnectedWalletName = () => {
+    if(!walletConnected)
+      return(
+        <p>No wallet connected</p>
+      )
+
+    else return (<p>{connectedWalletName} is the connected wallet</p>)
+  }
+
   const providerOptions = {
     binancechainwallet: {
       package: true
@@ -136,20 +159,29 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (provider?.on) {
+      const handleAccountsChanged = (accounts) => {
+        console.log("accountsChanged", accounts);
+        if (accounts) setAccount(accounts[0]);
+        checkIfAddressInWhitelist();
+      };
+      
+      provider.on("accountsChanged", handleAccountsChanged);
+    }
+  }, [provider]);
+
+  useEffect(() => {
     if(!walletConnected){
       web3ModalRef.current = new Web3Modal({
         network: "rinkeby", // optional
         cacheProvider: true, // optional
         providerOptions, // required
-        disableInjectedProvider: false
+        disableInjectedProvider: false,
+        theme:'dark'
       });      
     }
-    connectWallet();
-  },[walletConnected])
+  },[walletConnected]);
 
-  // _provider.on("accountsChanged", (a) => {
-  //   window.location.reload();
-  // });
 
   return (
     <div>
@@ -166,7 +198,8 @@ export default function Home() {
           </div>
           <div className={styles.description}>
             {numberOfWhitelisted} have already joined the Whitelist
-            <p>{connectedWalletName} is the selected provider</p>
+            {funcConnectedWalletName()}
+            <p>Current Account : {account}</p>
           </div>
           {renderButton()}
         </div>
