@@ -55,8 +55,8 @@ export default function Home() {
       setConnectedWalletName(providerName);
       // If user is not connected to the Rinkeby network, throw an error
       const { chainId } = await provider.getNetwork();
-      if (chainId !== 4) {
-        throw new Error("Change network to Rinkeby");
+      if (chainId !== 5) {
+        throw new Error("Change network to Goerli");
       }
 
       if (needSigner) {
